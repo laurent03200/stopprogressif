@@ -1,15 +1,15 @@
 package com.stopprogressif
 
 import android.app.Application
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,20 +30,21 @@ import kotlin.math.max
 @Composable
 fun HomeScreen(
     navController: NavController,
-    modifier: Modifier = Modifier,
-    progressViewModel: ProgressifViewModel = viewModel(
-        factory = ProgressifViewModelFactory(
-            LocalContext.current.applicationContext as Application
-        )
-    )
+    modifier: Modifier = Modifier
 ) {
+    // ⚡️ on récupère l’activité pour scoper la ViewModel dessus
+    val activity = LocalContext.current as ComponentActivity
+    val progressViewModel: ProgressifViewModel = viewModel(
+        viewModelStoreOwner = activity,
+        factory = ProgressifViewModelFactory(activity.application)
+    )
+
     val cigarettesFumees by progressViewModel.cigarettesFumees.collectAsState()
     val tempsRestant by progressViewModel.tempsRestant.collectAsState()
     val settings by progressViewModel.settingsData.collectAsState()
 
     val prixCigarette = settings.prixPaquet / max(settings.cigarettesParPaquet, 1)
-    val economiesRealisees =
-        max(settings.cigarettesHabituelles - cigarettesFumees, 0) * prixCigarette
+    val économies = max(settings.cigarettesHabituelles - cigarettesFumees, 0) * prixCigarette
 
     val totalTime = progressViewModel.getInitialIntervalle()
     val progress = (1f - tempsRestant / totalTime.toFloat()).coerceIn(0f, 1f)
@@ -53,30 +54,30 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Stop Progressif",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Stop Progressif", color = Color.White, fontWeight = FontWeight.Bold)
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF2196F3)
-                )
-                /* plus de section actions : le menu 3 points disparaît */
+                actions = {
+                    IconButton(
+                        onClick = { navController.navigate("settings") { launchSingleTop = true } }
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "Paramètres",
+                            tint = Color.White
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF2196F3))
             )
         }
-    ) { innerPadding ->
+    ) { inner ->
         Box(
             modifier = Modifier
-                .padding(innerPadding)
+                .padding(inner)
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        listOf(
-                            Color(0xFF2196F3),
-                            Color(0xFF673AB7),
-                            Color(0xFFE91E63)
-                        )
+                        listOf(Color(0xFF2196F3), Color(0xFF673AB7), Color(0xFFE91E63))
                     )
                 ),
             contentAlignment = Alignment.Center
@@ -92,7 +93,7 @@ fun HomeScreen(
 
                 if (tempsRestant < 0L) {
                     Text(
-                        text = "👏 Bien joué ! Vous dépassez votre intervalle prévu !",
+                        "👏 Bien joué ! Vous dépassez votre intervalle prévu !",
                         color = Color.Yellow,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold
@@ -104,11 +105,7 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     InfoCard("🚬", cigarettesFumees.toString(), Color(0xFFFFA726))
-                    InfoCard(
-                        "💰",
-                        "%.2f €".format(economiesRealisees),
-                        Color(0xFF4CAF50)
-                    )
+                    InfoCard("💰", "%.2f €".format(économies), Color(0xFF4CAF50))
                 }
 
                 Row(
@@ -117,17 +114,13 @@ fun HomeScreen(
                 ) {
                     Button(
                         onClick = { progressViewModel.fumerUneCigarette() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFF7043)
-                        )
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7043))
                     ) {
                         Text("🚬 J'ai fumé")
                     }
                     Button(
                         onClick = { progressViewModel.annulerDerniereCigarette() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFBDBDBD)
-                        )
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBDBDBD))
                     ) {
                         Text("❌ Annuler")
                     }
@@ -143,13 +136,12 @@ fun HomeScreen(
 
 @Composable
 fun CircularTimer(tempsRestant: Long, progress: Float) {
-    val isDepassement = tempsRestant < 0
+    val isOver = tempsRestant < 0
     val absTime = abs(tempsRestant)
-    val hours = (absTime / 3_600_000) % 24
-    val minutes = (absTime / 60_000) % 60
-    val seconds = (absTime / 1_000) % 60
-    val formattedTime =
-        (if (isDepassement) "+" else "") + String.format("%02d:%02d:%02d", hours, minutes, seconds)
+    val h = (absTime / 3_600_000) % 24
+    val m = (absTime / 60_000) % 60
+    val s = (absTime / 1_000) % 60
+    val formatted = (if (isOver) "+" else "") + String.format("%02d:%02d:%02d", h, m, s)
 
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(220.dp)) {
         Canvas(Modifier.size(220.dp)) {
@@ -161,29 +153,18 @@ fun CircularTimer(tempsRestant: Long, progress: Float) {
                 style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
             )
             drawArc(
-                color = if (isDepassement) Color(0xFF00E676) else Color.Cyan,
+                color = if (isOver) Color(0xFF00E676) else Color.Cyan,
                 startAngle = -90f,
                 sweepAngle = 360f * progress,
                 useCenter = false,
                 style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
             )
         }
-
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = formattedTime,
-                fontSize = 28.sp,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-            if (isDepassement) {
+            Text(formatted, fontSize = 28.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            if (isOver) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "🎉 Bien joué !",
-                    color = Color.Yellow,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text("🎉 Bien joué !", color = Color.Yellow, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -200,12 +181,7 @@ fun InfoCard(icon: String, value: String, color: Color) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(icon, fontSize = 26.sp)
-            Text(
-                text = value,
-                fontSize = 20.sp,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
+            Text(value, fontSize = 20.sp, color = Color.White, fontWeight = FontWeight.Bold)
         }
     }
 }

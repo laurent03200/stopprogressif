@@ -1,40 +1,18 @@
 package com.stopprogressif
 
 import android.app.Application
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SmallTopAppBar
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -47,37 +25,47 @@ import androidx.navigation.NavController
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    navController: NavController,
-    progressVM: ProgressifViewModel = viewModel(
-        factory = ProgressifViewModelFactory(
-            LocalContext.current.applicationContext as Application
-        )
-    )
+    navController: NavController
 ) {
+    // ⚡️ même scoping : la VM est partagée sur l’activité
+    val activity = LocalContext.current as ComponentActivity
+    val progressVM: ProgressifViewModel = viewModel(
+        viewModelStoreOwner = activity,
+        factory = ProgressifViewModelFactory(activity.application)
+    )
+
     val settings by progressVM.settingsData.collectAsState()
 
-    // États des champs, initialisés directement depuis `settings`
-    var prixPaquet by rememberSaveable { mutableStateOf(settings.prixPaquet.toString()) }
-    var parPaquet by rememberSaveable { mutableStateOf(settings.cigarettesParPaquet.toString()) }
-    var mode by rememberSaveable { mutableStateOf(settings.mode) }
-    var objectif by rememberSaveable { mutableStateOf(settings.objectifParJour.toString()) }
-    var heuresInt by rememberSaveable { mutableStateOf(settings.heuresEntreCigarettes.toString()) }
-    var minutesInt by rememberSaveable { mutableStateOf(settings.minutesEntreCigarettes.toString()) }
-    var habitude by rememberSaveable { mutableStateOf(settings.cigarettesHabituelles.toString()) }
-    var heureDebut by rememberSaveable { mutableStateOf(settings.heuresDebut.toString()) }
-    var heureFin by rememberSaveable { mutableStateOf(settings.heuresFin.toString()) }
+    var prixPaquet by rememberSaveable { mutableStateOf("") }
+    var parPaquet by rememberSaveable { mutableStateOf("") }
+    var mode by rememberSaveable { mutableStateOf(SettingsData.MODE_OBJECTIF) }
+    var objectif by rememberSaveable { mutableStateOf("") }
+    var heuresInt by rememberSaveable { mutableStateOf("") }
+    var minutesInt by rememberSaveable { mutableStateOf("") }
+    var habitude by rememberSaveable { mutableStateOf("") }
+    var heureDebut by rememberSaveable { mutableStateOf("") }
+    var heureFin by rememberSaveable { mutableStateOf("") }
 
-    // Quand les valeurs de `settings` changent, on resynchronise les champs
+    // on recharge dès que settings change
     LaunchedEffect(settings) {
-        prixPaquet = settings.prixPaquet.toString()
-        parPaquet = settings.cigarettesParPaquet.toString()
-        mode = settings.mode
-        objectif = settings.objectifParJour.toString()
-        heuresInt = settings.heuresEntreCigarettes.toString()
-        minutesInt = settings.minutesEntreCigarettes.toString()
-        habitude = settings.cigarettesHabituelles.toString()
-        heureDebut = settings.heuresDebut.toString()
-        heureFin = settings.heuresFin.toString()
+        prixPaquet  = settings.prixPaquet.toString()
+        parPaquet   = settings.cigarettesParPaquet.toString()
+        mode        = settings.mode
+        objectif    = settings.objectifParJour.toString()
+        heuresInt   = settings.heuresEntreCigarettes.toString()
+        minutesInt  = settings.minutesEntreCigarettes.toString()
+        habitude    = settings.cigarettesHabituelles.toString()
+        heureDebut  = settings.heuresDebut.toString()
+        heureFin    = settings.heuresFin.toString()
+    }
+    // quand on change de mode en live
+    LaunchedEffect(mode) {
+        if (mode == SettingsData.MODE_INTERVALLE) {
+            heuresInt  = settings.heuresEntreCigarettes.toString()
+            minutesInt = settings.minutesEntreCigarettes.toString()
+        } else {
+            objectif = settings.objectifParJour.toString()
+        }
     }
 
     Scaffold(
@@ -86,28 +74,28 @@ fun SettingsScreen(
                 title = { Text("Paramètres", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Retour")
+                        Icon(Icons.Default.ArrowBack, "Retour")
                     }
                 }
             )
         }
-    ) { pad ->
+    ) { inner ->
         Column(
             Modifier
-                .padding(pad)
+                .padding(inner)
                 .verticalScroll(rememberScrollState())
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Bloc 1 : paquet
+            /* Bloc 1 – Paquet */
             SettingsCard("Informations sur le paquet") {
-                NumberField(prixPaquet, "Prix du paquet (€)") { prixPaquet = it }
-                NumberField(parPaquet, "Cigarettes par paquet") { parPaquet = it }
+                NumberField(prixPaquet, "Prix du paquet (€)")   { prixPaquet   = it }
+                NumberField(parPaquet,  "Cigarettes par paquet") { parPaquet    = it }
             }
 
-            // Bloc 2 : mode
+            /* Bloc 2 – Mode */
             SettingsCard("Mode de progression") {
                 ModeChips(mode) { mode = it }
                 Spacer(Modifier.height(8.dp))
@@ -116,59 +104,57 @@ fun SettingsScreen(
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         NumberField(
-                            heuresInt,
-                            "Heures",
-                            Modifier.fillMaxWidth(0.5f)
-                        ) { heuresInt = it.filter { c -> c.isDigit() } }
+                            value    = heuresInt,
+                            label    = "Heures",
+                            modifier = Modifier.weight(1f)
+                        ) { heuresInt  = it.filter { c -> c.isDigit() } }
                         NumberField(
-                            minutesInt,
-                            "Minutes",
-                            Modifier.fillMaxWidth(0.5f)
+                            value    = minutesInt,
+                            label    = "Minutes",
+                            modifier = Modifier.weight(1f)
                         ) { minutesInt = it.filter { c -> c.isDigit() } }
                     }
                 }
             }
 
-            // Bloc 3 : habitude & plage horaire
+            /* Bloc 3 – Habitude & Plage horaire */
             SettingsCard("Habitude & plage horaire active") {
                 NumberField(habitude, "Cigarettes habituelles / jour") { habitude = it }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     NumberField(
-                        heureDebut, "Début (0‑23h)", Modifier.fillMaxWidth(0.5f)
+                        value    = heureDebut,
+                        label    = "Début (0‑23h)",
+                        modifier = Modifier.weight(1f)
                     ) { heureDebut = it.filter { c -> c.isDigit() } }
                     NumberField(
-                        heureFin, "Fin (0‑23h)", Modifier.fillMaxWidth(0.5f)
-                    ) { heureFin = it.filter { c -> c.isDigit() } }
+                        value    = heureFin,
+                        label    = "Fin (0‑23h)",
+                        modifier = Modifier.weight(1f)
+                    ) { heureFin   = it.filter { c -> c.isDigit() } }
                 }
             }
 
-            // Bouton Sauvegarder
             Button(
                 onClick = {
-                    // Lecture et validation des inputs
-                    val prix = prixPaquet.toFloatOrNull() ?: settings.prixPaquet
-                    val par = parPaquet.toIntOrNull() ?: settings.cigarettesParPaquet
-                    val obj = objectif.toIntOrNull() ?: settings.objectifParJour
-                    val hInt = heuresInt.toIntOrNull() ?: settings.heuresEntreCigarettes
-                    val mInt = minutesInt.toIntOrNull() ?: settings.minutesEntreCigarettes
-                    val hab = habitude.toIntOrNull() ?: settings.cigarettesHabituelles
-                    val hDeb = heureDebut.toIntOrNull() ?: settings.heuresDebut
-                    val hFinVal = heureFin.toIntOrNull() ?: settings.heuresFin
+                    val hI = heuresInt.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                    val mI = minutesInt.toIntOrNull()?.coerceIn(0,59) ?: 0
+                    val hD = heureDebut.toIntOrNull()?.coerceIn(0,23) ?: 7
+                    val hF = heureFin.toIntOrNull()?.coerceIn(0,23) ?: 23
 
                     progressVM.saveSettings(
                         SettingsData(
-                            prixPaquet = prix,
-                            cigarettesParPaquet = par,
-                            mode = mode,
-                            objectifParJour = obj,
-                            heuresDebut = hDeb,
-                            minutesDebut = 0,
-                            heuresFin = hFinVal,
-                            minutesFin = 0,
-                            heuresEntreCigarettes = hInt,
-                            minutesEntreCigarettes = mInt,
-                            cigarettesHabituelles = hab
+                            prixPaquet              = prixPaquet.toFloatOrNull() ?: 10f,
+                            cigarettesParPaquet     = parPaquet.toIntOrNull() ?: 20,
+                            mode                    = mode,
+                            objectifParJour         = objectif.toIntOrNull() ?: 20,
+                            heuresEntreCigarettes   = hI,
+                            minutesEntreCigarettes  = mI,
+                            cigarettesHabituelles   = habitude.toIntOrNull() ?: 30,
+                            heuresDebut             = hD,
+                            minutesDebut            = 0,
+                            heuresFin               = hF,
+                            minutesFin              = 0
                         )
                     )
                     navController.popBackStack()
@@ -183,6 +169,8 @@ fun SettingsScreen(
     }
 }
 
+/*────────────────────────────────────────────────────────────────────────────*/
+
 @Composable
 private fun SettingsCard(
     title: String,
@@ -190,9 +178,12 @@ private fun SettingsCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Text(title, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             content()
         }
@@ -207,12 +198,12 @@ private fun NumberField(
     onValueChange: (String) -> Unit
 ) {
     OutlinedTextField(
-        value = value,
-        onValueChange = { txt -> onValueChange(txt.filter { c -> c.isDigit() || c == '.' }) },
-        label = { Text(label) },
+        value           = value,
+        onValueChange   = { onValueChange(it.filter { c -> c.isDigit() || c == '.' }) },
+        label           = { Text(label) },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = modifier.fillMaxWidth(),
-        singleLine = true
+        modifier        = modifier.fillMaxWidth(),
+        singleLine      = true
     )
 }
 
@@ -224,13 +215,13 @@ private fun ModeChips(
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         FilterChip(
             selected = selected == SettingsData.MODE_OBJECTIF,
-            onClick = { onChange(SettingsData.MODE_OBJECTIF) },
-            label = { Text("Objectif / jour") }
+            onClick  = { onChange(SettingsData.MODE_OBJECTIF) },
+            label    = { Text("Objectif / jour") }
         )
         FilterChip(
             selected = selected == SettingsData.MODE_INTERVALLE,
-            onClick = { onChange(SettingsData.MODE_INTERVALLE) },
-            label = { Text("Intervalle") }
+            onClick  = { onChange(SettingsData.MODE_INTERVALLE) },
+            label    = { Text("Intervalle") }
         )
     }
 }

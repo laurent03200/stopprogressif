@@ -24,37 +24,51 @@ class ProgressifViewModel(application: Application) : AndroidViewModel(applicati
     private val _tempsRestant = MutableStateFlow(0L)
     val tempsRestant: StateFlow<Long> = _tempsRestant
 
+    private val _shouldSuggestAugmentation = MutableStateFlow(false)
+    val shouldSuggestAugmentation: StateFlow<Boolean> = _shouldSuggestAugmentation
+
+    private companion object {
+        private const val ONE_SECOND = 1_000L
+        private const val SUGGESTION_THRESHOLD_MS = 15 * 60_000L
+        private const val NB_INTERVALS_BEFORE_SUGGESTION = 3
+    }
+
+    private val ecartsList = mutableListOf<Long>()
     private var isTimerRunning = false
 
+    // Pour gérer la remise à zéro quotidienne
+    private var lastDayChecked: Long = -1L
+
     init {
-        // Restaure l'état et démarre le timer
-        val (savedTemps, savedCig, timestamp) = dataStore.loadStateWithTimestamp()
+        // Restauration de l'état précédent + démarrage du timer
+        val (savedTemps, savedCigarettes, timestamp) = dataStore.loadStateWithTimestamp()
         val now = System.currentTimeMillis()
         _tempsRestant.value = savedTemps - (now - timestamp)
-        _cigarettesFumees.value = savedCig
+        _cigarettesFumees.value = savedCigarettes
         startTimer()
     }
 
     /**
-     * Met à jour les settings, recalcule et réinitialise
-     * le timer, puis persiste en arrière-plan.
+     * Sauvegarde des nouveaux réglages et réinitialisation immédiate du timer
      */
     fun saveSettings(newSettings: SettingsData) {
-        // 1) Met à jour immédiatement
         _settingsData.value = newSettings
-
-        // 2) Recalcule l'intervalle et remet à zéro
-        val initial = computeInterval(newSettings)
-        _tempsRestant.value = initial
-
-        // 3) Persiste settings + nouvel état timer
+        resetTimer()
         viewModelScope.launch {
             dataStore.saveSettings(newSettings)
-            dataStore.saveStateWithTimestamp(initial, _cigarettesFumees.value)
         }
     }
 
     fun fumerUneCigarette() {
+        val interval = getInitialIntervalle()
+        val ecoule = interval - _tempsRestant.value
+        if (ecoule > SUGGESTION_THRESHOLD_MS) {
+            ecartsList.add(ecoule)
+            if (ecartsList.size >= NB_INTERVALS_BEFORE_SUGGESTION) {
+                _shouldSuggestAugmentation.value = true
+                ecartsList.clear()
+            }
+        }
         _cigarettesFumees.value += 1
         resetTimer()
     }
@@ -63,8 +77,13 @@ class ProgressifViewModel(application: Application) : AndroidViewModel(applicati
         if (_cigarettesFumees.value > 0) _cigarettesFumees.value -= 1
     }
 
+    fun clearSuggestionFlag() {
+        _shouldSuggestAugmentation.value = false
+    }
+
+    /** Réinitialise le timer selon le mode actuel */
     private fun resetTimer() {
-        val initial = computeInterval(_settingsData.value)
+        val initial = getInitialIntervalle()
         _tempsRestant.value = initial
         viewModelScope.launch {
             dataStore.saveStateWithTimestamp(initial, _cigarettesFumees.value)
@@ -76,23 +95,66 @@ class ProgressifViewModel(application: Application) : AndroidViewModel(applicati
         isTimerRunning = true
         viewModelScope.launch {
             while (true) {
-                delay(1_000L)
-                val now = System.currentTimeMillis()
-                val last = dataStore.getLastUpdateTime()
-                val diff = now - last
-                val updated = _tempsRestant.value - diff
-                _tempsRestant.value = updated
-                dataStore.saveStateWithTimestamp(updated, _cigarettesFumees.value)
+                delay(ONE_SECOND)
+                tick()
             }
         }
     }
 
-    /**
-     * Calcule l’intervalle en ms selon le mode :
-     * – OBJECTIF : (durée active) / objectifParJour
-     * – INTERVALLE : heuresEntreCigarettes + minutesEntreCigarettes
-     */
-    private fun computeInterval(s: SettingsData): Long {
+    /** Boucle principale : décrément du timer, reset quotidien et hors plages */
+    private suspend fun tick() {
+        val now = System.currentTimeMillis()
+        // 1) Reset quotidien si on change de jour
+        val today = now / TimeUnit.DAYS.toMillis(1)
+        if (today != lastDayChecked) {
+            lastDayChecked = today
+            resetDaily()
+            return
+        }
+        val s = _settingsData.value
+        // 2) Vérifie plage active
+        val (startMs, endMs) = boundsMillis(s)
+        val nowOfDay = nowOfDayMillis()
+        if (nowOfDay < startMs || nowOfDay > endMs) {
+            // Hors plage active, on stoppe le tick
+            return
+        }
+        // 3) Décrément normal
+        val lastUpdate = dataStore.getLastUpdateTime()
+        val delta = now - lastUpdate
+        val updated = _tempsRestant.value - delta
+        _tempsRestant.value = updated
+        dataStore.saveStateWithTimestamp(updated, _cigarettesFumees.value)
+    }
+
+    /** Millisecondes écoulées depuis minuit */
+    private fun nowOfDayMillis(): Long =
+        System.currentTimeMillis() % TimeUnit.DAYS.toMillis(1)
+
+    /** Retourne les bornes [début, fin] de la plage active en ms */
+    private fun boundsMillis(s: SettingsData): Pair<Long, Long> {
+        val start = TimeUnit.HOURS.toMillis(s.heuresDebut.toLong()) +
+                TimeUnit.MINUTES.toMillis(s.minutesDebut.toLong())
+        val end   = TimeUnit.HOURS.toMillis(s.heuresFin.toLong()) +
+                TimeUnit.MINUTES.toMillis(s.minutesFin.toLong())
+        return start to end
+    }
+
+    /** Reset complet à zéro pour une nouvelle journée */
+    private fun resetDaily() {
+        _cigarettesFumees.value = 0
+        _shouldSuggestAugmentation.value = false
+        ecartsList.clear()
+        val initial = getInitialIntervalle()
+        _tempsRestant.value = initial
+        viewModelScope.launch {
+            dataStore.saveStateWithTimestamp(initial, 0)
+        }
+    }
+
+    /** Calcule l’intervalle initial selon le mode */
+    fun getInitialIntervalle(): Long {
+        val s = _settingsData.value
         return if (s.mode == SettingsData.MODE_OBJECTIF) {
             val window = computeActiveWindowMillis(
                 s.heuresDebut, s.minutesDebut,
@@ -105,10 +167,7 @@ class ProgressifViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Calcule la durée (ms) entre début et fin de plage horaire,
-     * gère le chevauchement sur minuit.
-     */
+    /** Calcule la durée de la plage active en ms, gère le chevauchement de minuit */
     private fun computeActiveWindowMillis(
         startH: Int, startM: Int,
         endH: Int,   endM: Int
