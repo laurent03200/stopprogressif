@@ -1,9 +1,44 @@
-# Android / IntelliJ
-*.iml
+
+# Android Studio
 .gradle/
-/local.properties
-/.idea/
-/build/
-/captures/
-/.externalNativeBuild/
-/app/build/
+.idea/
+*.iml
+local.properties
+
+# Built application files
+*.apk
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+build/
+
+# Log/Metadata
+*.log
+captures/
+.externalNativeBuild/
+
+# NDK
+obj/
+
+# IntelliJ
+*.iws
+*.ipr
+*.orig
+
+# Keystore files
+*.jks
+
+# Misc
+.DS_Store
+*.swp
+*.swo
