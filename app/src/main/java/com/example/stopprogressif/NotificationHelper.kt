@@ -1,64 +1,66 @@
-package com.stopprogressif
+package com.example.stopprogressif
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import java.time.Instant // Ajoutez cette importation
+import java.time.ZoneId // Ajoutez cette importation
+import java.time.format.DateTimeFormatter // Ajoutez cette importation
 
-/**
- * Aide à la création et à l’envoi des notifications « Cigarette autorisée ».
- */
 class NotificationHelper(private val context: Context) {
 
-    companion object {
-        private const val CHANNEL_ID = "cigarette_channel"
-        private const val CHANNEL_NAME = "Notifications Cigarettes"
-        private const val CHANNEL_DESC = "Annonce qu’une nouvelle cigarette est autorisée"
-        private const val NOTIFICATION_ID = 1001
-    }
+    private val channelId = "cigarette_notification_channel"
+    private val notificationId = 1001
 
     init {
         createNotificationChannel()
     }
 
-    /** Crée le canal si nécessaire (API 26+). */
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply { description = CHANNEL_DESC }
+    fun sendCigaretteReadyNotification() {
+        sendNotification("Cigarette autorisée", "C'est le moment de fumer ta prochaine cigarette.")
+    }
 
-            val nm: NotificationManager =
-                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
+    fun sendMotivationNotification() {
+        sendNotification("Reste motivé !", "Tu tiens bon, continue sur cette lancée.")
+    }
+
+    fun sendDailyResetNotification() {
+        sendNotification("Nouvelle journée", "Le compteur est réinitialisé. Nouveau départ aujourd’hui.")
+    }
+
+    // MODIFIEZ CETTE FONCTION
+    fun sendTimerFinishedNotification(lastUpdateTimeMillis: Long) { // Ajoutez le paramètre
+        val formattedTime = DateTimeFormatter.ofPattern("HH:mm")
+            .format(Instant.ofEpochMilli(lastUpdateTimeMillis).atZone(ZoneId.systemDefault()))
+        sendNotification("Timer terminé", "Tu peux fumer une cigarette maintenant. Le temps s'est écoulé à $formattedTime.")
+    }
+
+    private fun sendNotification(title: String, message: String) {
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+
+        with(NotificationManagerCompat.from(context)) {
+            notify(notificationId, builder.build())
         }
     }
 
-    /** Envoie la notification « Tu peux fumer ». */
-    fun sendCigaretteNotification() {
-        val pendingIntent = PendingIntent.getActivity(
-            context, 0,
-            Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("Cigarette autorisée")
-            .setContentText("🚬 Tu peux fumer ta prochaine cigarette !")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .build()
-
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Notifications Stop Progressif"
+            val descriptionText = "Notifications liées à votre progression anti-tabac"
+            val importance = NotificationManager.IMPORTANCE_HIGH
+            val channel = NotificationChannel(channelId, name, importance).apply {
+                description = descriptionText
+            }
+            val notificationManager: NotificationManager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
     }
 }

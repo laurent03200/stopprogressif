@@ -1,4 +1,4 @@
-package com.stopprogressif     // ← le package doit être exactement celui‑ci !
+package com.example.stopprogressif // ← le package doit être exactement celui‑ci !
 
 import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
