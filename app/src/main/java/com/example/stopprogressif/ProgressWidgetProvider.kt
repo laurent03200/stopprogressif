@@ -26,7 +26,9 @@ class ProgressWidgetProvider : AppWidgetProvider() {
 
         CoroutineScope(Dispatchers.IO).launch {
             val dataStore = DataStoreManager(context)
-            val (initRestant, _, timestamp) = dataStore.loadStateWithTimestamp()
+            // Gérer la nullabilité du timestamp
+            val (initRestant, _, timestampNullable) = dataStore.loadStateWithTimestamp()
+            val timestamp = timestampNullable ?: 0L // Utiliser 0L si null
 
             val now = SystemClock.elapsedRealtime()
             val diff = now - timestamp

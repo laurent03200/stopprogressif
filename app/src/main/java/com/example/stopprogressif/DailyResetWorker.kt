@@ -1,4 +1,3 @@
-
 package com.example.stopprogressif
 
 import android.content.Context
@@ -20,7 +19,7 @@ class DailyResetWorker(appContext: Context, workerParams: WorkerParameters) :
         val historique = dataStore.loadAllDailyReports()
 
         // Step 1: ARCHIVE yesterday's data
-        val (interval, count, _) = dataStore.loadStateWithTimestamp()
+        val (interval, count, timestamp) = dataStore.loadStateWithTimestamp() // Récupère le timestamp
         val moyenneDepassement = historique.find { it.date == date }?.avgTimeExceededMs ?: 0L
         val report = DailyReport(
             date = date,
@@ -41,7 +40,7 @@ class DailyResetWorker(appContext: Context, workerParams: WorkerParameters) :
 
         // Step 2: RESET EVERYTHING
         val now = System.currentTimeMillis()
-        dataStore.saveStateWithTimestamp(0L, 0L) // reset cigarettes + interval
+        dataStore.saveStateWithTimestamp(0L, 0L, now) // <-- Correction ici : ajout du timestamp
         dataStore.setLastCigaretteTime(now)
         dataStore.setNextCigaretteTime(now)
 

@@ -8,9 +8,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.example.stopprogressif.ui.screens.HomeScreen
 import com.example.stopprogressif.ui.screens.SettingsScreen
-import com.example.stopprogressif.ui.screens.CigaretteTrackerScreen
 import com.example.stopprogressif.ui.screens.ProgressionScreen
 import com.example.stopprogressif.viewmodel.ProgressifViewModel
+// import com.example.stopprogressif.ui.screens.formatMillisToHoursMinutes // Cette importation n'est plus nécessaire ici si elle n'est pas utilisée directement dans NavGraph
 
 @Composable
 fun NavGraph(
@@ -19,8 +19,13 @@ fun NavGraph(
 ) {
     // Collect states as they are flows
     val historique by progressifViewModel.historique.collectAsState()
-    val semaineMoyenne by progressifViewModel.semaineMoyenne.collectAsState()
-    val moisMoyenne by progressifViewModel.moisMoyenne.collectAsState()
+    // Les lignes suivantes ne sont plus nécessaires car ProgressionScreen n'attend plus ces paramètres directement
+    // val semaineMoyenne by progressifViewModel.semaineMoyenne.collectAsState()
+    // val moisMoyenne by progressifViewModel.moisMoyenne.collectAsState()
+
+    // Les lignes suivantes ne sont plus nécessaires car ProgressionScreen n'attend plus ces paramètres directement
+    // val semaineMoyenneText = formatMillisToHoursMinutes(semaineMoyenne)
+    // val moisMoyenneText = formatMillisToHoursMinutes(moisMoyenne)
 
     NavHost(
         navController = navController,
@@ -38,17 +43,11 @@ fun NavGraph(
                 progressifViewModel = progressifViewModel
             )
         }
-        composable("tracker") {
-            CigaretteTrackerScreen(
-                navController = navController,
-                progressifViewModel = progressifViewModel
-            )
-        }
+
         composable("progression") {
             ProgressionScreen(
-                dailyReports = historique, // Use the collected state
-                semaineMoyenne = semaineMoyenne, // Use the collected state
-                moisMoyenne = moisMoyenne // Use the collected state
+                // dailyReports = historique, // Pas nécessaire car ProgressionScreen utilise hiltViewModel() pour obtenir l'historique
+                progressifViewModel = progressifViewModel // Passé car votre `ProgressionScreen` l'attend
             )
         }
     }

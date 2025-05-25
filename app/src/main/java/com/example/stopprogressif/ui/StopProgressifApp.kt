@@ -1,4 +1,3 @@
-
 package com.example.stopprogressif.ui
 
 import androidx.compose.runtime.Composable

@@ -1,23 +1,57 @@
 package com.example.stopprogressif.viewmodel
 
+import android.app.AlarmManager
 import android.app.Application
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import android.util.Log
 import com.example.stopprogressif.NotificationHelper
-import com.example.stopprogressif.model.DailyReport
 import com.example.stopprogressif.data.DataStoreManager
 import com.example.stopprogressif.data.Settings
+import com.example.stopprogressif.model.DailyReport
+import com.example.stopprogressif.receiver.AlarmReceiver
+import com.example.stopprogressif.timer.TimerController
+import com.example.stopprogressif.timer.TimerService // <-- MODIFICATION ICI : package correct
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import androidx.compose.ui.graphics.Color
 import java.time.LocalDate
-import com.example.stopprogressif.timer.TimerController
+import java.time.format.DateTimeFormatter
+import java.util.*
+import javax.inject.Inject
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToLong
-import kotlin.math.abs
 
-class ProgressifViewModel(application: Application) : AndroidViewModel(application) {
+@HiltViewModel
+open class ProgressifViewModel @Inject constructor(
+    application: Application,
+    private val dataStore: DataStoreManager,
+    private val notificationHelper: NotificationHelper,
+    private val timerController: TimerController // TimerController maintenant injecté
+) : AndroidViewModel(application) {
+
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    private val _settingsData = MutableStateFlow(Settings())
+    val settingsData: StateFlow<Settings> = _settingsData.asStateFlow()
+
+    private val _timeLeftFormatted = MutableStateFlow("00:00:00")
+    val timeLeftFormatted: StateFlow<String> = _timeLeftFormatted.asStateFlow()
+
+    private val _currentCigarettesCount = MutableStateFlow(0L)
+    val currentCigarettesCount: StateFlow<Long> = _currentCigarettesCount.asStateFlow()
+
+    private val _lastCigaretteTime = MutableStateFlow<Long?>(null)
+    val lastCigaretteTime: StateFlow<Long?> = _lastCigaretteTime.asStateFlow()
+
+    private val _nextCigaretteTime = MutableStateFlow<Long?>(null)
+    val nextCigaretteTime: StateFlow<Long?> = _nextCigaretteTime.asStateFlow()
 
     private val _historique = MutableStateFlow<List<DailyReport>>(emptyList())
     val historique: StateFlow<List<DailyReport>> = _historique.asStateFlow()
@@ -28,235 +62,265 @@ class ProgressifViewModel(application: Application) : AndroidViewModel(applicati
     private val _moisMoyenne = MutableStateFlow(0L)
     val moisMoyenne: StateFlow<Long> = _moisMoyenne.asStateFlow()
 
-    private val _lastCigaretteTime = MutableStateFlow<Long?>(null)
-    val lastCigaretteTime: StateFlow<Long?> = _lastCigaretteTime.asStateFlow()
+    private val _moyenneTenue = MutableStateFlow(0L)
+    val moyenneTenue: StateFlow<Long> = _moyenneTenue.asStateFlow()
 
-    private val _nextCigaretteTime = MutableStateFlow<Long?>(null)
-    val nextCigaretteTime: StateFlow<Long?> = _nextCigaretteTime.asStateFlow()
-
-    private var timerNotificationSent = false
-    private var depasseTimerActive: Boolean = false
-
-    private val dataStore = DataStoreManager(application)
-
-    private val _settingsData = MutableStateFlow(Settings())
-    val settingsData: StateFlow<Settings> = _settingsData.asStateFlow()
-
-    private val _cigarettesFumees = MutableStateFlow(0L)
-    val cigarettesFumees: StateFlow<Long> = _cigarettesFumees.asStateFlow()
-
-    private val _tempsRestant = MutableStateFlow(0L)
-    val tempsRestant: StateFlow<Long> = _tempsRestant.asStateFlow()
-
-    private val _tempsDepasse = MutableStateFlow(0L)
-    val tempsDepasse: StateFlow<Long> = _tempsDepasse.asStateFlow()
-
-    private val _cercleColor = MutableStateFlow(Color.Red)
-    val cercleColor: StateFlow<Color> = _cercleColor.asStateFlow()
+    private var timerNotificationSent = false // Pour éviter d'envoyer plusieurs notifications
 
     init {
-        viewModelScope.launch { // Wrapped the suspend call in a coroutine
-            val today = java.time.LocalDate.now().toString()
-            val saved = dataStore.loadAllDailyReports().find { it.date == today && it.type == "daily" }
-            if (saved != null && saved.avgTimeExceededMs > 0) {
-                _tempsDepasse.value = -1L // verrouiller à la relance
-                Log.d("DEBUG_PROG", "🔒 Verrou restauré au démarrage : ${saved.avgTimeExceededMs} ms")
-            }
-
-            val allReports = dataStore.loadAllDailyReports()
-            _historique.value = allReports
-
-            _semaineMoyenne.value = allReports
-                .filter { it.type == "daily" }
-                .takeLast(7)
-                .map { it.avgTimeExceededMs }
-                .takeIf { it.isNotEmpty() }
-                ?.average()?.toLong() ?: 0L
-
-            _moisMoyenne.value = allReports
-                .filter { it.type == "daily" }
-                .takeLast(30)
-                .map { it.avgTimeExceededMs }
-                .takeIf { it.isNotEmpty() }
-                ?.average()?.toLong() ?: 0L
-
+        Log.d("ProgressifViewModel", "ViewModel initialized")
+        viewModelScope.launch {
+            // Charge les paramètres au démarrage du ViewModel
             _settingsData.value = dataStore.loadSettings()
-            _lastCigaretteTime.value = dataStore.getLastCigaretteTime()
-            val interval = computeInterval()
-            _nextCigaretteTime.value = _lastCigaretteTime.value?.plus(interval)
+            Log.d("ProgressifViewModel", "Settings loaded: ${_settingsData.value}")
+
+            // Charge l'état actuel et met à jour les observables
+            val (interval, count, timestamp) = dataStore.loadStateWithTimestamp()
+            _currentCigarettesCount.value = count
+            _lastCigaretteTime.value = timestamp
+            _nextCigaretteTime.value = timestamp?.plus(interval) // Use safe call and plus
+
+            // Charge l'historique des rapports quotidiens
             _historique.value = dataStore.loadAllDailyReports()
-            refresh()
+            calculerMoyennes() // Recalcule les moyennes après le chargement de l'historique
+
+            // Démarrer l'observateur du timerController
+            timerController.timeLeft.collect { timeLeft ->
+                _timeLeftFormatted.value = formatMillisToHoursMinutesSeconds(timeLeft)
+                if (timeLeft <= 0L && timerController.state.value == TimerController.TimerState.FINISHED && !timerNotificationSent) {
+                    notificationHelper.sendTimerFinishedNotification(_lastCigaretteTime.value ?: System.currentTimeMillis())
+                    timerNotificationSent = true
+                }
+            }
+        }
+
+        // Observer les changements dans les paramètres pour mettre à jour les intervalles
+        viewModelScope.launch {
+            settingsData.collect {
+                // Si le mode de sevrage change ou les valeurs d'espacement/objectif changent
+                // et si un timer est actif, recalculer le prochain temps de cigarette.
+                refresh()
+            }
+        }
+
+        // Observer l'état du timerController pour relancer le service si nécessaire
+        viewModelScope.launch {
+            timerController.state.collect { state ->
+                val context = getApplication<Application>()
+                if (state == TimerController.TimerState.RUNNING) {
+                    // MODIFICATION ICI : Utilisation directe de TimerService après l'import correct
+                    val serviceIntent = Intent(context, TimerService::class.java).apply {
+                        action = TimerService.ACTION_START
+                        putExtra(TimerService.EXTRA_INITIAL_TIME, timerController.timeLeft.value)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                    Log.d("ProgressifViewModel", "TimerService démarré/relancé via ViewModel.")
+                } else if (state == TimerController.TimerState.FINISHED || state == TimerController.TimerState.IDLE) {
+                    // MODIFICATION ICI : Utilisation directe de TimerService après l'import correct
+                    val serviceIntent = Intent(context, TimerService::class.java).apply {
+                        action = TimerService.ACTION_STOP
+                    }
+                    context.stopService(serviceIntent)
+                    Log.d("ProgressifViewModel", "TimerService arrêté via ViewModel.")
+                }
+            }
         }
     }
 
     fun refresh() {
         viewModelScope.launch {
-            val (savedInterval, savedCount, lastUpdate) = dataStore.loadStateWithTimestamp()
-            val now = System.currentTimeMillis()
-
-            _cigarettesFumees.value = savedCount
-
-            val currentNextCigTime = _nextCigaretteTime.value ?: (now + computeInterval())
-            val remainingTime = (currentNextCigTime - now)
-            TimerController.start(remainingTime)
-            Log.d("DEBUG_PROG", "🧮 RemainingTime: $remainingTime, Now: $now, NextCig: $currentNextCigTime")
-            _tempsRestant.value = remainingTime
-
-            Log.d("DEBUG_PROG", "⏱️ Calcul: _tempsDepasse = ${_tempsDepasse.value}")
-
-            _tempsRestant.value = remainingTime
-
-            if (remainingTime <= 0) {
-                if (_tempsDepasse.value != -1L) {
-                    _tempsDepasse.value = abs(remainingTime)
-                }
-
-                if (_tempsDepasse.value > 0 && _tempsDepasse.value != -1L) {
-                    val today = java.time.LocalDate.now().toString()
-                    val alreadySaved = _historique.value.any {
-                        it.date == today && it.type == "daily" && it.avgTimeExceededMs > 0
-                    }
-                    if (!alreadySaved) {
-                        Log.d("DEBUG_PROG", "💾 Auto-saving depassement = ${_tempsDepasse.value}")
-                        dataStore.saveOrUpdateDailyReportWithDepasse(_tempsDepasse.value)
-                        _tempsDepasse.value = -1L // verrouillage
-                    }
-                }
-
-                Log.d("DEBUG_PROG", "📈 REFRESH _tempsDepasse = ${_tempsDepasse.value}")
-                _cercleColor.value = Color(0xFF00FF00)
-                if (!timerNotificationSent) {
-                    NotificationHelper(getApplication()).sendTimerFinishedNotification(now)
-                    timerNotificationSent = true
-                }
-            } else {
-                _tempsDepasse.value = 0L
-                _cercleColor.value = Color.Red
-                timerNotificationSent = false
-            }
+            _isRefreshing.value = true
+            // Charger les dernières données depuis DataStore
+            val (interval, count, timestamp) = dataStore.loadStateWithTimestamp()
+            _settingsData.value = dataStore.loadSettings() // Settings loaded after state
+            _currentCigarettesCount.value = count
+            _lastCigaretteTime.value = timestamp
             _historique.value = dataStore.loadAllDailyReports()
-        }
-    }
 
-    fun fumerUneCigarette() {
-        viewModelScope.launch {
-            val interval = computeInterval()
-            val newCount = _cigarettesFumees.value + 1L
-            depasseTimerActive = false
-            val now = System.currentTimeMillis()
-
-            _cigarettesFumees.value = newCount
-            _lastCigaretteTime.value = now
-            _nextCigaretteTime.value = now + interval
-            dataStore.setNextCigaretteTime(now + interval)
-
-            val tempsTenue = (now - (_nextCigaretteTime.value?.minus(interval) ?: now)).coerceAtLeast(0L)
-            dataStore.appendDureeTenue(tempsTenue)
-            timerNotificationSent = false
-
-            dataStore.saveOrUpdateDailyReportWithDepasse(_tempsDepasse.value)
-            _tempsDepasse.value = -1L // verrouillage
-            dataStore.saveStateWithTimestamp(interval, newCount)
-            dataStore.setLastCigaretteTime(now)
-
-            enregistrerOuMaj(newCount)
-            _historique.value = dataStore.loadAllDailyReports()
-            refresh()
-        }
-    }
-
-    private fun enregistrerOuMaj(nombreCigarettes: Long) {
-        viewModelScope.launch {
-            val today = LocalDate.now().toString()
-            val reports = dataStore.loadAllDailyReports().toMutableList()
-
-            val rapportDuJour = reports.find { it.date == today && it.type == "daily" }
-
-            val updatedReport = if (rapportDuJour != null) {
-                rapportDuJour.copy(cigarettesSmoked = nombreCigarettes.toInt())
-            } else {
-                val settings = _settingsData.value
-                val prixUnitaire = settings.prixPaquet / max(settings.cigarettesParPaquet, 1)
-                val economieCents = (prixUnitaire * nombreCigarettes * 100).roundToLong()
-
-                DailyReport(
-                    date = today,
-                    cigarettesSmoked = nombreCigarettes.toInt(),
-                    avgTimeExceededMs = 0,
-                    avgIntervalMs = 0,
-                    moneySavedCents = economieCents,
-                    type = "daily"
-                )
-            }
-            dataStore.saveDailyReport(updatedReport)
-        }
-    }
-
-    fun annulerDerniereCigarette() {
-        viewModelScope.launch {
-            if (_cigarettesFumees.value > 0) {
-                val newCount = _cigarettesFumees.value - 1L
-                dataStore.saveStateWithTimestamp(_tempsRestant.value, newCount)
-                _cigarettesFumees.value = newCount
-                enregistrerOuMaj(newCount)
-                refresh()
-                _historique.value = dataStore.loadAllDailyReports()
-            }
-        }
-    }
-
-    fun resetDaily() {
-        viewModelScope.launch {
-            dataStore.saveStateWithTimestamp(0L, 0L)
-            _cigarettesFumees.value = 0L
-            _lastCigaretteTime.value = null
-            _nextCigaretteTime.value = null
-            timerNotificationSent = false
-            enregistrerOuMaj(0L)
-            _historique.value = dataStore.loadAllDailyReports()
-            refresh()
-        }
-    }
-
-    private fun computeInterval(): Long {
-        val settings = _settingsData.value
-        return (settings.espacementHeures * 60 + settings.espacementMinutes) * 60_000L
-    }
-
-    fun reloadStateIfReset() {
-        viewModelScope.launch {
-            val (savedInterval, savedCount, savedTimestamp) = dataStore.loadStateWithTimestamp()
-            _cigarettesFumees.value = savedCount
-
-            val currentRemaining = _tempsRestant.value
-            _tempsDepasse.value = if (currentRemaining > 0L) 0L else abs(currentRemaining)
-
-            _lastCigaretteTime.value = dataStore.getLastCigaretteTime()
+            // Recalculer le prochain temps de cigarette
             _lastCigaretteTime.value?.let { last ->
                 _nextCigaretteTime.value = last + computeInterval()
             } ?: run {
+                // Si aucune dernière cigarette, le prochain temps est maintenant + intervalle
                 _nextCigaretteTime.value = System.currentTimeMillis() + computeInterval()
             }
-            timerNotificationSent = false
-            _historique.value = dataStore.loadAllDailyReports()
-            refresh()
+
+            // Mettre à jour le timerController si nécessaire
+            _nextCigaretteTime.value?.let { nextTime ->
+                val timeRemaining = max(0L, nextTime - System.currentTimeMillis())
+                if (timerController.state.value != TimerController.TimerState.RUNNING || timerController.timeLeft.value != timeRemaining) {
+                    if (timeRemaining > 0) {
+                        timerController.start(timeRemaining)
+                    } else {
+                        timerController.stop()
+                    }
+                }
+            }
+
+            calculerMoyennes() // Recalcule les moyennes après le rafraîchissement
+            _isRefreshing.value = false
+            Log.d("ProgressifViewModel", "Données rafraîchies.")
         }
     }
 
-    suspend fun getAllDailyReports(): List<DailyReport> {
-        return dataStore.loadAllDailyReports()
+    fun onCigaretteSmoked() {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val (lastInterval, lastCount, _) = dataStore.loadStateWithTimestamp() // Timestamp not needed here
+
+            // Calculer le temps réel passé depuis la dernière cigarette
+            val actualInterval = now - (_lastCigaretteTime.value ?: now)
+            val exceededTime = max(0L, abs(actualInterval - computeInterval()))
+
+            // Mettre à jour le nombre de cigarettes et l'intervalle moyen
+            val newCount = lastCount + 1
+            val newInterval = if (lastCount == 0L) actualInterval else (lastInterval * lastCount + actualInterval) / newCount
+
+            dataStore.saveStateWithTimestamp(newInterval, newCount, now) // Passed timestamp
+            _currentCigarettesCount.value = newCount
+            _lastCigaretteTime.value = now
+
+            // Ajouter le dépassement au rapport quotidien
+            val today = LocalDate.now().toString()
+            dataStore.addDailyDepassement(today, exceededTime)
+
+            // Recalculer le prochain temps de cigarette et démarrer le timer
+            _nextCigaretteTime.value = now + computeInterval()
+            _nextCigaretteTime.value?.let { nextTime ->
+                val timeRemaining = nextTime - now
+                timerController.start(timeRemaining)
+                Log.d("ProgressifViewModel", "Prochaine cigarette autorisée à ${Date(nextTime)}")
+            }
+
+            timerNotificationSent = false // Réinitialiser le flag de notification
+
+            // Rafraîchir l'historique et les statistiques
+            _historique.value = dataStore.loadAllDailyReports()
+            refreshStats()
+        }
+    }
+
+    fun resetDailyProgress() {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            dataStore.saveStateWithTimestamp(0L, 0L, now) // Réinitialise les cigarettes et l'intervalle avec timestamp
+            dataStore.setLastCigaretteTime(now)
+            dataStore.setNextCigaretteTime(now + computeInterval()) // Réinitialise le prochain temps
+            _currentCigarettesCount.value = 0
+            _lastCigaretteTime.value = now
+            _nextCigaretteTime.value = now + computeInterval()
+            timerController.start(computeInterval())
+            notificationHelper.sendDailyResetNotification() // Envoyer une notification de réinitialisation
+            timerNotificationSent = false
+            _historique.value = dataStore.loadAllDailyReports() // Recharge l'historique (peut être déjà fait par le worker)
+            refreshStats() // Recalcule les statistiques
+            Log.d("ProgressifViewModel", "Progression quotidienne réinitialisée.")
+        }
     }
 
     fun saveSettings(newSettings: Settings) {
         _settingsData.value = newSettings
         viewModelScope.launch {
             dataStore.saveSettings(newSettings)
-            _historique.value = dataStore.loadAllDailyReports()
+            // Après la sauvegarde des paramètres, rafraîchir pour que les changements soient pris en compte
             refresh()
+            Log.d("ProgressifViewModel", "Paramètres sauvegardés et rafraîchis: $newSettings")
         }
     }
 
-    private fun startDepasseTimer() {
-        // Placeholder pour logique future
+    fun refreshStats() {
+        viewModelScope.launch {
+            val moyenne = dataStore.getMoyenneTenue()
+            _moyenneTenue.value = moyenne
+        }
+    }
+
+    private fun calculerMoyennes() {
+        viewModelScope.launch {
+            val reports = dataStore.loadAllDailyReports().filter { it.type == "daily" }
+
+            _semaineMoyenne.value = reports.takeLast(7)
+                .map { it.avgTimeExceededMs }
+                .takeIf { it.isNotEmpty() }
+                ?.average()?.roundToLong() ?: 0L
+
+            _moisMoyenne.value = reports.takeLast(30)
+                .map { it.avgTimeExceededMs }
+                .takeIf { it.isNotEmpty() }
+                ?.average()?.roundToLong() ?: 0L
+        }
+    }
+
+    private fun computeInterval(): Long {
+        val settings = _settingsData.value
+        val intervalMillis = if (settings.modeSevrage == Settings.MODE_ESPACEMENT) {
+            (settings.espacementHeures * 60 + settings.espacementMinutes) * 60 * 1000L
+        } else { // MODE_OBJECTIF
+            // Calculer l'intervalle basé sur l'objectif et les cigarettes habituelles
+            val dailyMilliseconds = 24 * 60 * 60 * 1000L
+            if (settings.objectifParJour > 0) {
+                dailyMilliseconds / settings.objectifParJour
+            } else {
+                0L // Éviter la division par zéro
+            }
+        }
+        Log.d("ProgressifViewModel", "Intervalle calculé: ${intervalMillis / 1000} secondes")
+        return intervalMillis
+    }
+
+    private fun formatMillisToHoursMinutesSeconds(millis: Long): String {
+        val totalSeconds = millis / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        // Assurez-vous que le timer est arrêté lorsque le ViewModel est détruit
+        timerController.stop()
+        cancelAlarm() // Annule toute alarme pendante lorsque le ViewModel est détruit
+        Log.d("ProgressifViewModel", "ViewModel cleared and timer stopped.")
+    }
+
+    // Gestion des alarmes pour des rappels précis (en dehors du service)
+    private fun scheduleAlarm(timeInMillis: Long) {
+        val alarmManager = getApplication<Application>().getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(getApplication(), AlarmReceiver::class.java).apply {
+            action = "com.example.stopprogressif.ACTION_TRIGGER_ALARM"
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            getApplication(),
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+        } else {
+            alarmManager.setExact(AlarmManager.RTC_WAKEUP, timeInMillis, pendingIntent)
+        }
+        Log.d("ProgressifViewModel", "Alarme programmée pour ${Date(timeInMillis)}")
+    }
+
+    private fun cancelAlarm() {
+        val alarmManager = getApplication<Application>().getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(getApplication(), AlarmReceiver::class.java).apply {
+            action = "com.example.stopprogressif.ACTION_TRIGGER_ALARM"
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            getApplication(),
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.cancel(pendingIntent)
+        Log.d("ProgressifViewModel", "Alarme annulée.")
     }
 }

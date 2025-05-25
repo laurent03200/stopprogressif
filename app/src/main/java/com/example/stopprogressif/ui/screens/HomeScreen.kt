@@ -33,148 +33,113 @@ fun HomeScreen(
     progressifViewModel: ProgressifViewModel,
     modifier: Modifier = Modifier
 ) {
-    val timeLeft by progressifViewModel.tempsRestant.collectAsState()
-    val isOver = timeLeft <= 0
+    // Correction des noms des StateFlows
+    val timeLeftFormatted by progressifViewModel.timeLeftFormatted.collectAsState()
+    val currentCigarettesCount by progressifViewModel.currentCigarettesCount.collectAsState()
+    val nextCigaretteTime by progressifViewModel.nextCigaretteTime.collectAsState()
+    val lastCigaretteTime by progressifViewModel.lastCigaretteTime.collectAsState()
     val tempsDepasse by progressifViewModel.tempsDepasse.collectAsState()
-    val displayTime = if (timeLeft < 0 && tempsDepasse > 0) tempsDepasse else abs(timeLeft)
-    val cercleColor by progressifViewModel.cercleColor.collectAsState()
-    val lastCigTime by progressifViewModel.lastCigaretteTime.collectAsState()
-    val nextCigTime by progressifViewModel.nextCigaretteTime.collectAsState()
-    val cigarettesFumees by progressifViewModel.cigarettesFumees.collectAsState()
-    val settings by progressifViewModel.settingsData.collectAsState()
-
-    val prixUnitaire = settings.prixPaquet / max(settings.cigarettesParPaquet, 1)
-    val economieActuelle = max(settings.cigarettesHabituelles - cigarettesFumees, 0) * prixUnitaire
+    val settingsData by progressifViewModel.settingsData.collectAsState()
+    val isRefreshing by progressifViewModel.isRefreshing.collectAsState()
+    val isOver = timeLeftFormatted == "00:00"
 
     val scope = rememberCoroutineScope()
-    var expanded by remember { mutableStateOf(false) }
-
-    val interval = (settings.espacementHeures * 60 + settings.espacementMinutes) * 60_000f
-    val progress = if (!isOver) {
-        if (interval > 0f) {
-            1f - (abs(timeLeft).toFloat() / interval)
-        } else {
-            0f
-        }
-    } else {
-        (tempsDepasse % 1_800_000f) / 1_800_000f
-    }
 
     LaunchedEffect(Unit) {
-        while (true) {
-            progressifViewModel.refresh()
-            delay(1000)
-        }
+        progressifViewModel.refresh()
     }
 
+    // Calcul de l'économie actuelle
+    val economieActuelle = remember(currentCigarettesCount, settingsData) {
+        val coutParCigarette = settingsData.prixPaquet / settingsData.cigarettesParPaquet
+        val cigarettesNonFumees = max(0, settingsData.cigarettesHabituelles - currentCigarettesCount)
+        cigarettesNonFumees * coutParCigarette
+    }
+
+
     Scaffold(
-        modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("Stop Progressif", color = Color.White) },
+                title = { Text("Stop Progressif") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF1B1B1B), // Couleur sombre pour la barre
+                    titleContentColor = Color.White
+                ),
                 actions = {
-                    Box {
-                        IconButton(onClick = { expanded = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = Color.White)
-                        }
-
-                        DropdownMenu(
-                            expanded = expanded,
-                            onDismissRequest = { expanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Accueil") },
-                                onClick = {
-                                    expanded = false
-                                    navController.navigate("home")
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Suivi") },
-                                onClick = {
-                                    expanded = false
-                                    navController.navigate("tracker")
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Progression") },
-                                onClick = {
-                                    expanded = false
-                                    navController.navigate("progression")
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Réglages") },
-                                onClick = {
-                                    expanded = false
-                                    navController.navigate("settings")
-                                }
-                            )
+                    IconButton(onClick = { navController.navigate("settings") }) {
+                        Icon(Icons.Filled.MoreVert, "Settings", tint = Color.White)
+                    }
+                }
+            )
+        },
+        bottomBar = {
+            BottomAppBar(
+                containerColor = Color(0xFF1B1B1B),
+                contentColor = Color.White
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Bouton Accueil
+                    Button(
+                        onClick = { navController.navigate("home") },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Filled.Home, contentDescription = "Accueil")
+                            Text("Accueil", fontSize = 10.sp)
                         }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF2196F3))
-            )
+
+                    // Bouton Progression
+                    Button(
+                        onClick = { navController.navigate("progression") },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Filled.BarChart, contentDescription = "Progression")
+                            Text("Progression", fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
         }
-    ) { innerPadding ->
+    ) { paddingValues ->
         Box(
-            modifier = Modifier
-                .padding(innerPadding)
+            modifier = modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF2196F3), Color(0xFF673AB7), Color(0xFFE91E63))
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color(0xFF2C2C2C), Color(0xFF121212))
                     )
-                ),
+                )
+                .padding(paddingValues),
             contentAlignment = Alignment.Center
         ) {
             Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceAround,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceAround
+                    .padding(16.dp)
             ) {
+                Spacer(Modifier.height(16.dp))
+
                 CircularTimerModern(
-        timeMillis = displayTime,
-        progress = progress,
-        modifier = Modifier.size(200.dp),
-        circleColor = cercleColor
-    )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                val messageText = when {
-                    !isOver -> when {
-                        abs(timeLeft) < 5 * 60 * 1000 -> "🕐 Presque... reste fort !"
-                        abs(timeLeft) < 10 * 60 * 1000 -> "💪 Tu tiens bon !"
-                        else -> "⏳ Patience, ça avance."
-                    }
-                    tempsDepasse > 30 * 60 * 1000 -> "🧠 Héroïque ! Tu continues à résister."
-                    tempsDepasse > 5 * 60 * 1000 -> "🔥 Tu bats ton record !"
-                    tempsDepasse > 60 * 1000 -> "💪 Tu résistes, bravo !"
-                    else -> "🔓 C’est bon, tu peux fumer maintenant."
-                }
-
-                Text(
-                    text = messageText,
-                    color = if (isOver) Color(0xFF4CAF50) else Color(0xFFFF5252),
-                    style = MaterialTheme.typography.bodyLarge
+                    timeLeft = if (isOver) tempsDepasse else progressifViewModel.tempsRestant.collectAsState().value,
+                    isOver = isOver
                 )
 
-                lastCigTime?.let {
+                if (nextCigaretteTime != null) {
                     val heure = DateTimeFormatter.ofPattern("HH:mm")
-                        .format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))
-                    Text("Dernière cigarette : $heure", color = Color.White, fontSize = 14.sp)
-                }
-                nextCigTime?.let {
-                    val heure = DateTimeFormatter.ofPattern("HH:mm")
-                        .format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))
+                        .format(Instant.ofEpochMilli(nextCigaretteTime!!).atZone(ZoneId.systemDefault()))
                     Text("Prochaine cigarette : $heure", color = Color.White, fontSize = 14.sp)
                 }
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    InfoCard("🚬", cigarettesFumees.toString(), Color(0xFFFFA726))
+                    InfoCard("🚬", currentCigarettesCount.toString(), Color(0xFFFFA726)) // Utiliser currentCigarettesCount
                     InfoCard("💰", "%.2f €".format(economieActuelle), Color(0xFF4CAF50))
                 }
 
@@ -191,7 +156,7 @@ fun HomeScreen(
                         Text("🚬 J’ai fumé")
                     }
                     Button(
-                        onClick = { progressifViewModel.annulerDerniereCigarette() },
+                        onClick = { progressifViewModel.annulerDerniereCigarette() }, // Correction ici
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBDBDBD))
                     ) {
                         Text("❌ Annuler")

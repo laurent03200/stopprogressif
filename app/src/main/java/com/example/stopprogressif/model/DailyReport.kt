@@ -31,21 +31,32 @@ data class DailyReport(
     companion object {
         fun deserialize(serialized: String): DailyReport {
             val parts = serialized.split(";")
-            if (parts.size < 6) {
-                throw IllegalArgumentException("Format de DailyReport invalide: $serialized")
+            // Gérer le cas où le format des parties est incorrect ou incomplet
+            return if (parts.size >= 6) {
+                DailyReport(
+                    date = parts[0],
+                    cigarettesSmoked = parts[1].toIntOrNull() ?: 0,
+                    avgTimeExceededMs = parts[2].toLongOrNull() ?: 0L,
+                    avgIntervalMs = parts[3].toLongOrNull() ?: 0L,
+                    moneySavedCents = parts[4].toLongOrNull() ?: 0L,
+                    type = parts[5]
+                )
+            } else {
+                // Retourner une valeur par défaut ou lancer une exception si le format est crucial
+                // Pour l'instant, je retourne une valeur par défaut pour éviter les crashs.
+                DailyReport(
+                    date = LocalDate.now().toString(),
+                    cigarettesSmoked = 0,
+                    avgTimeExceededMs = 0L,
+                    avgIntervalMs = 0L,
+                    moneySavedCents = 0L,
+                    type = "daily"
+                )
             }
-            return DailyReport(
-                date = parts[0],
-                cigarettesSmoked = parts[1].toInt(),
-                avgTimeExceededMs = parts[2].toLong(),
-                avgIntervalMs = parts[3].toLong(),
-                moneySavedCents = parts[4].toLong(),
-                type = parts[5]
-            )
         }
 
-        fun serializeList(list: List<DailyReport>): String {
-            return list.joinToString("|") { it.serializeInternal() }
+        fun serializeList(reports: List<DailyReport>): String {
+            return reports.joinToString("|") { it.serializeInternal() }
         }
 
         fun deserializeList(serialized: String): List<DailyReport> {
@@ -72,16 +83,16 @@ data class DailyReport(
         var cigarettesSmoked: Int = 0,
         var sumAvgIntervalMs: Long = 0L,
         var sumAvgExceededMs: Long = 0L,
-        var moneySavedCents: Long = 0L, // AJOUTEZ 'var' ici pour la mutabilité
+        var moneySavedCents: Long = 0L,
         var countReports: Int = 0
     ) {
         fun build(): DailyReport {
             return DailyReport(
                 date = this.date.toString(),
                 cigarettesSmoked = this.cigarettesSmoked,
-                avgTimeExceededMs = if (countReports > 0) (sumAvgExceededMs.toDouble() / countReports).roundToLong() else 0L, // .toDouble() ajouté
-                avgIntervalMs = if (countReports > 0) (sumAvgIntervalMs.toDouble() / countReports).roundToLong() else 0L, // .toDouble() ajouté
-                moneySavedCents = this.moneySavedCents, // Cette ligne était la 87, elle est maintenant correcte
+                avgTimeExceededMs = if (countReports > 0) (sumAvgExceededMs.toDouble() / countReports).roundToLong() else 0L,
+                avgIntervalMs = if (countReports > 0) (sumAvgIntervalMs.toDouble() / countReports).roundToLong() else 0L,
+                moneySavedCents = this.moneySavedCents,
                 type = this.type
             )
         }

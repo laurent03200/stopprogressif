@@ -1,4 +1,4 @@
-package com.stopprogressif
+package com.example.stopprogressif
 
 /**
  * Données de configuration persistées pour l'application StopProgressif.

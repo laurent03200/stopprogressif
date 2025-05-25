@@ -22,7 +22,8 @@ class MidnightReceiver : BroadcastReceiver() {
             val today = System.currentTimeMillis() / (1000 * 60 * 60 * 24)
             val lastShown = prefs.getLong("notif_last_day", -1L)
 
-            dataStore.resetDailyState()
+            // Correction ici : Utilisation de saveStateWithTimestamp pour réinitialiser l'état
+            dataStore.saveStateWithTimestamp(0L, 0L, System.currentTimeMillis())
 
             if (lastShown != today) {
                 prefs.edit().putLong("notif_last_day", today).apply()
